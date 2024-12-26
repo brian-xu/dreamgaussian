@@ -1,19 +1,15 @@
 tqdm
 rich
 ninja
-numpy
 pandas
 scipy
 scikit-learn
 matplotlib
-opencv-python
 imageio
 imageio-ffmpeg
 omegaconf
 
-torch
 einops
-plyfile
 pygltflib
 
 # for gui
@@ -35,3 +31,6 @@ rembg[gpu,cli]
 
 # gradio demo
 gradio
+
+nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast@main
+kiui @ git+https://github.com/ashawkey/kiuikit@main

@@ -25,26 +25,20 @@ https://github.com/dreamgaussian/dreamgaussian/assets/25863658/db860801-7b9c-4b3
 ## Install
 
 ```bash
+git clone https://github.com/brian-xu/dreamgaussian.git --recursive
+
+conda env create --file environment.yml
+
+conda activate dreamgaussian_test
+
+conda install -c "nvidia/label/cuda-12.1.0" cuda-toolkit
+conda install nvidia/label/cuda-12.1.0::cuda-cudart
+
+pip install submodules/diff-gaussian-rasterization
+pip install submodules/diff-surfel-rasterization
+pip install submodules/simple-knn
+
 pip install -r requirements.txt
-
-# a modified gaussian splatting (+ depth, alpha rendering)
-git clone --recursive https://github.com/ashawkey/diff-gaussian-rasterization
-pip install ./diff-gaussian-rasterization
-
-# simple-knn
-pip install ./simple-knn
-
-# nvdiffrast
-pip install git+https://github.com/NVlabs/nvdiffrast/
-
-# kiuikit
-pip install git+https://github.com/ashawkey/kiuikit
-
-# To use MVdream, also install:
-pip install git+https://github.com/bytedance/MVDream
-
-# To use ImageDream, also install:
-pip install git+https://github.com/bytedance/ImageDream/#subdirectory=extern/ImageDream
 ```
 
 Tested on:
