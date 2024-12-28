@@ -1,14 +1,9 @@
-from diffusers import (
-    DDIMScheduler,
-    StableDiffusionPipeline,
-)
-from diffusers.utils.import_utils import is_xformers_available
-
-
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from diffusers import DDIMScheduler, StableDiffusionPipeline
+from diffusers.utils.import_utils import is_xformers_available
 
 
 def seed_everything(seed):
@@ -85,14 +80,14 @@ class StableDiffusion(nn.Module):
     def get_text_embeds(self, prompts, negative_prompts):
         pos_embeds = self.encode_text(prompts)  # [1, 77, 768]
         neg_embeds = self.encode_text(negative_prompts)
-        self.embeddings['pos'] = pos_embeds
-        self.embeddings['neg'] = neg_embeds
+        self.embeddings["pos"] = pos_embeds
+        self.embeddings["neg"] = neg_embeds
 
         # directional embeddings
-        for d in ['front', 'side', 'back']:
-            embeds = self.encode_text([f'{p}, {d} view' for p in prompts])
+        for d in ["front", "side", "back"]:
+            embeds = self.encode_text([f"{p}, {d} view" for p in prompts])
             self.embeddings[d] = embeds
-    
+
     def encode_text(self, prompt):
         # prompt: [str]
         inputs = self.tokenizer(
@@ -105,34 +100,51 @@ class StableDiffusion(nn.Module):
         return embeddings
 
     @torch.no_grad()
-    def refine(self, pred_rgb,
-               guidance_scale=100, steps=50, strength=0.8,
-        ):
+    def refine(
+        self,
+        pred_rgb,
+        guidance_scale=100,
+        steps=50,
+        strength=0.8,
+    ):
 
         batch_size = pred_rgb.shape[0]
-        pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode='bilinear', align_corners=False)
+        pred_rgb_512 = F.interpolate(
+            pred_rgb, (512, 512), mode="bilinear", align_corners=False
+        )
         latents = self.encode_imgs(pred_rgb_512.to(self.dtype))
         # latents = torch.randn((1, 4, 64, 64), device=self.device, dtype=self.dtype)
 
         self.scheduler.set_timesteps(steps)
         init_step = int(steps * strength)
-        latents = self.scheduler.add_noise(latents, torch.randn_like(latents), self.scheduler.timesteps[init_step])
-        embeddings = torch.cat([self.embeddings['pos'].expand(batch_size, -1, -1), self.embeddings['neg'].expand(batch_size, -1, -1)])
+        latents = self.scheduler.add_noise(
+            latents, torch.randn_like(latents), self.scheduler.timesteps[init_step]
+        )
+        embeddings = torch.cat(
+            [
+                self.embeddings["pos"].expand(batch_size, -1, -1),
+                self.embeddings["neg"].expand(batch_size, -1, -1),
+            ]
+        )
 
         for i, t in enumerate(self.scheduler.timesteps[init_step:]):
-    
+
             latent_model_input = torch.cat([latents] * 2)
 
             noise_pred = self.unet(
-                latent_model_input, t, encoder_hidden_states=embeddings,
+                latent_model_input,
+                t,
+                encoder_hidden_states=embeddings,
             ).sample
 
             noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
-            
+            noise_pred = noise_pred_uncond + guidance_scale * (
+                noise_pred_cond - noise_pred_uncond
+            )
+
             latents = self.scheduler.step(noise_pred, t, latents).prev_sample
 
-        imgs = self.decode_latents(latents) # [1, 3, 512, 512]
+        imgs = self.decode_latents(latents)  # [1, 3, 512, 512]
         return imgs
 
     def train_step(
@@ -141,17 +153,24 @@ class StableDiffusion(nn.Module):
         step_ratio=None,
         guidance_scale=100,
         as_latent=False,
-        vers=None, hors=None,
+        vers=None,
+        hors=None,
     ):
-        
+
         batch_size = pred_rgb.shape[0]
         pred_rgb = pred_rgb.to(self.dtype)
 
         if as_latent:
-            latents = F.interpolate(pred_rgb, (64, 64), mode="bilinear", align_corners=False) * 2 - 1
+            latents = (
+                F.interpolate(pred_rgb, (64, 64), mode="bilinear", align_corners=False)
+                * 2
+                - 1
+            )
         else:
             # interp to 512x512 to be fed into vae.
-            pred_rgb_512 = F.interpolate(pred_rgb, (512, 512), mode="bilinear", align_corners=False)
+            pred_rgb_512 = F.interpolate(
+                pred_rgb, (512, 512), mode="bilinear", align_corners=False
+            )
             # encode image into latents with vae, requires grad!
             latents = self.encode_imgs(pred_rgb_512)
 
@@ -159,10 +178,18 @@ class StableDiffusion(nn.Module):
             if step_ratio is not None:
                 # dreamtime-like
                 # t = self.max_step - (self.max_step - self.min_step) * np.sqrt(step_ratio)
-                t = np.round((1 - step_ratio) * self.num_train_timesteps).clip(self.min_step, self.max_step)
+                t = np.round((1 - step_ratio) * self.num_train_timesteps).clip(
+                    self.min_step, self.max_step
+                )
                 t = torch.full((batch_size,), t, dtype=torch.long, device=self.device)
             else:
-                t = torch.randint(self.min_step, self.max_step + 1, (batch_size,), dtype=torch.long, device=self.device)
+                t = torch.randint(
+                    self.min_step,
+                    self.max_step + 1,
+                    (batch_size,),
+                    dtype=torch.long,
+                    device=self.device,
+                )
 
             # w(t), sigma_t^2
             w = (1 - self.alphas[t]).view(batch_size, 1, 1, 1)
@@ -176,14 +203,26 @@ class StableDiffusion(nn.Module):
             tt = torch.cat([t] * 2)
 
             if hors is None:
-                embeddings = torch.cat([self.embeddings['pos'].expand(batch_size, -1, -1), self.embeddings['neg'].expand(batch_size, -1, -1)])
+                embeddings = torch.cat(
+                    [
+                        self.embeddings["pos"].expand(batch_size, -1, -1),
+                        self.embeddings["neg"].expand(batch_size, -1, -1),
+                    ]
+                )
             else:
-                def _get_dir_ind(h):
-                    if abs(h) < 60: return 'front'
-                    elif abs(h) < 120: return 'side'
-                    else: return 'back'
 
-                embeddings = torch.cat([self.embeddings[_get_dir_ind(h)] for h in hors] + [self.embeddings['neg'].expand(batch_size, -1, -1)])
+                def _get_dir_ind(h):
+                    if abs(h) < 60:
+                        return "front"
+                    elif abs(h) < 120:
+                        return "side"
+                    else:
+                        return "back"
+
+                embeddings = torch.cat(
+                    [self.embeddings[_get_dir_ind(h)] for h in hors]
+                    + [self.embeddings["neg"].expand(batch_size, -1, -1)]
+                )
 
             noise_pred = self.unet(
                 latent_model_input, tt, encoder_hidden_states=embeddings
@@ -202,7 +241,11 @@ class StableDiffusion(nn.Module):
             # grad = grad.clamp(-1, 1)
 
         target = (latents - grad).detach()
-        loss = 0.5 * F.mse_loss(latents.float(), target, reduction='sum') / latents.shape[0]
+        loss = (
+            0.5
+            * F.mse_loss(latents.float(), target, reduction="sum")
+            / latents.shape[0]
+        )
 
         return loss
 
@@ -228,7 +271,12 @@ class StableDiffusion(nn.Module):
 
         batch_size = latents.shape[0]
         self.scheduler.set_timesteps(num_inference_steps)
-        embeddings = torch.cat([self.embeddings['pos'].expand(batch_size, -1, -1), self.embeddings['neg'].expand(batch_size, -1, -1)])
+        embeddings = torch.cat(
+            [
+                self.embeddings["pos"].expand(batch_size, -1, -1),
+                self.embeddings["neg"].expand(batch_size, -1, -1),
+            ]
+        )
 
         for i, t in enumerate(self.scheduler.timesteps):
             # expand the latents if we are doing classifier-free guidance to avoid doing two forward passes.
@@ -285,7 +333,7 @@ class StableDiffusion(nn.Module):
 
         # Prompts -> text embeds
         self.get_text_embeds(prompts, negative_prompts)
-        
+
         # Text embeds -> img latents
         latents = self.produce_latents(
             height=height,
@@ -307,6 +355,7 @@ class StableDiffusion(nn.Module):
 
 if __name__ == "__main__":
     import argparse
+
     import matplotlib.pyplot as plt
 
     parser = argparse.ArgumentParser()

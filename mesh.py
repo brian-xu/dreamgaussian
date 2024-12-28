@@ -1,8 +1,10 @@
 import os
+
 import cv2
+import numpy as np
 import torch
 import trimesh
-import numpy as np
+
 
 def dot(x, y):
     return torch.sum(x * y, -1, keepdim=True)
@@ -15,6 +17,7 @@ def length(x, eps=1e-20):
 def safe_normalize(x, eps=1e-20):
     return x / length(x, eps)
 
+
 class Mesh:
     def __init__(
         self,
@@ -25,7 +28,7 @@ class Mesh:
         vt=None,
         ft=None,
         albedo=None,
-        vc=None, # vertex color
+        vc=None,  # vertex color
         device=None,
     ):
         self.device = device
@@ -44,7 +47,15 @@ class Mesh:
         self.ori_scale = 1
 
     @classmethod
-    def load(cls, path=None, resize=True, renormal=True, retex=False, front_dir='+z', **kwargs):
+    def load(
+        cls,
+        path=None,
+        resize=True,
+        renormal=True,
+        retex=False,
+        front_dir="+z",
+        **kwargs,
+    ):
         # assume init with kwargs
         if path is None:
             mesh = cls(**kwargs)
@@ -72,24 +83,60 @@ class Mesh:
         if front_dir != "+z":
             # axis switch
             if "-z" in front_dir:
-                T = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, -1]], device=mesh.device, dtype=torch.float32)
+                T = torch.tensor(
+                    [[1, 0, 0], [0, 1, 0], [0, 0, -1]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
             elif "+x" in front_dir:
-                T = torch.tensor([[0, 0, 1], [0, 1, 0], [1, 0, 0]], device=mesh.device, dtype=torch.float32)
+                T = torch.tensor(
+                    [[0, 0, 1], [0, 1, 0], [1, 0, 0]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
             elif "-x" in front_dir:
-                T = torch.tensor([[0, 0, -1], [0, 1, 0], [1, 0, 0]], device=mesh.device, dtype=torch.float32)
+                T = torch.tensor(
+                    [[0, 0, -1], [0, 1, 0], [1, 0, 0]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
             elif "+y" in front_dir:
-                T = torch.tensor([[1, 0, 0], [0, 0, 1], [0, 1, 0]], device=mesh.device, dtype=torch.float32)
+                T = torch.tensor(
+                    [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
             elif "-y" in front_dir:
-                T = torch.tensor([[1, 0, 0], [0, 0, -1], [0, 1, 0]], device=mesh.device, dtype=torch.float32)
+                T = torch.tensor(
+                    [[1, 0, 0], [0, 0, -1], [0, 1, 0]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
             else:
-                T = torch.tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]], device=mesh.device, dtype=torch.float32)
+                T = torch.tensor(
+                    [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
             # rotation (how many 90 degrees)
-            if '1' in front_dir:
-                T @= torch.tensor([[0, -1, 0], [1, 0, 0], [0, 0, 1]], device=mesh.device, dtype=torch.float32) 
-            elif '2' in front_dir:
-                T @= torch.tensor([[1, 0, 0], [0, -1, 0], [0, 0, 1]], device=mesh.device, dtype=torch.float32) 
-            elif '3' in front_dir:
-                T @= torch.tensor([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], device=mesh.device, dtype=torch.float32) 
+            if "1" in front_dir:
+                T @= torch.tensor(
+                    [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
+            elif "2" in front_dir:
+                T @= torch.tensor(
+                    [[1, 0, 0], [0, -1, 0], [0, 0, 1]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
+            elif "3" in front_dir:
+                T @= torch.tensor(
+                    [[0, 1, 0], [-1, 0, 0], [0, 0, 1]],
+                    device=mesh.device,
+                    dtype=torch.float32,
+                )
             mesh.v @= T
             mesh.vn @= T
 
@@ -139,7 +186,7 @@ class Mesh:
                 mtl_path = split_line[1]
             # usemtl
             elif prefix == "usemtl":
-                pass # ignored
+                pass  # ignored
             # v/vn/vt
             elif prefix == "v":
                 vertices.append([float(v) for v in split_line[1:]])
@@ -197,7 +244,9 @@ class Mesh:
             mtl_path_candidates = []
             if mtl_path is not None:
                 mtl_path_candidates.append(mtl_path)
-                mtl_path_candidates.append(os.path.join(os.path.dirname(path), mtl_path))
+                mtl_path_candidates.append(
+                    os.path.join(os.path.dirname(path), mtl_path)
+                )
             mtl_path_candidates.append(path.replace(".obj", ".mtl"))
 
             mtl_path = None
@@ -205,7 +254,7 @@ class Mesh:
                 if os.path.exists(candidate):
                     mtl_path = candidate
                     break
-            
+
             # if albedo_path is not provided, try retrieve it from mtl
             if mtl_path is not None and albedo_path is None:
                 with open(mtl_path, "r") as f:
@@ -221,13 +270,15 @@ class Mesh:
                         albedo_path = os.path.join(os.path.dirname(path), split_line[1])
                         print(f"[load_obj] use texture from: {albedo_path}")
                         break
-            
+
             # still not found albedo_path, or the path doesn't exist
             if albedo_path is None or not os.path.exists(albedo_path):
                 # init an empty texture
                 print(f"[load_obj] init empty albedo!")
                 # albedo = np.random.rand(1024, 1024, 3).astype(np.float32)
-                albedo = np.ones((1024, 1024, 3), dtype=np.float32) * np.array([0.5, 0.5, 0.5])  # default color
+                albedo = np.ones((1024, 1024, 3), dtype=np.float32) * np.array(
+                    [0.5, 0.5, 0.5]
+                )  # default color
             else:
                 albedo = cv2.imread(albedo_path, cv2.IMREAD_UNCHANGED)
                 albedo = cv2.cvtColor(albedo, cv2.COLOR_BGR2RGB)
@@ -266,24 +317,31 @@ class Mesh:
                 _mesh = trimesh.util.concatenate(_concat)
         else:
             _mesh = _data
-        
-        if _mesh.visual.kind == 'vertex':
+
+        if _mesh.visual.kind == "vertex":
             vertex_colors = _mesh.visual.vertex_colors
             vertex_colors = np.array(vertex_colors[..., :3]).astype(np.float32) / 255
             mesh.vc = torch.tensor(vertex_colors, dtype=torch.float32, device=device)
             print(f"[load_trimesh] use vertex color: {mesh.vc.shape}")
-        elif _mesh.visual.kind == 'texture':
+        elif _mesh.visual.kind == "texture":
             _material = _mesh.visual.material
             if isinstance(_material, trimesh.visual.material.PBRMaterial):
                 texture = np.array(_material.baseColorTexture).astype(np.float32) / 255
             elif isinstance(_material, trimesh.visual.material.SimpleMaterial):
-                texture = np.array(_material.to_pbr().baseColorTexture).astype(np.float32) / 255
+                texture = (
+                    np.array(_material.to_pbr().baseColorTexture).astype(np.float32)
+                    / 255
+                )
             else:
-                raise NotImplementedError(f"material type {type(_material)} not supported!")
+                raise NotImplementedError(
+                    f"material type {type(_material)} not supported!"
+                )
             mesh.albedo = torch.tensor(texture, dtype=torch.float32, device=device)
             print(f"[load_trimesh] load texture: {texture.shape}")
         else:
-            texture = np.ones((1024, 1024, 3), dtype=np.float32) * np.array([0.5, 0.5, 0.5])
+            texture = np.ones((1024, 1024, 3), dtype=np.float32) * np.array(
+                [0.5, 0.5, 0.5]
+            )
             mesh.albedo = torch.tensor(texture, dtype=torch.float32, device=device)
             print(f"[load_trimesh] failed to load texture.")
 
@@ -386,7 +444,7 @@ class Mesh:
             # save to cache
             if cache_path is not None:
                 np.savez(cache_path, vt=vt_np, ft=ft_np, vmapping=vmapping)
-        
+
         vt = torch.from_numpy(vt_np.astype(np.float32)).to(self.device)
         ft = torch.from_numpy(ft_np.astype(np.int32)).to(self.device)
         self.vt = vt
@@ -394,16 +452,20 @@ class Mesh:
 
         if vmap:
             # remap v/f to vt/ft, so each v correspond to a unique vt. (necessary for gltf)
-            vmapping = torch.from_numpy(vmapping.astype(np.int64)).long().to(self.device)
+            vmapping = (
+                torch.from_numpy(vmapping.astype(np.int64)).long().to(self.device)
+            )
             self.align_v_to_vt(vmapping)
-    
+
     def align_v_to_vt(self, vmapping=None):
         # remap v/f and vn/vn to vt/ft.
         if vmapping is None:
             ft = self.ft.view(-1).long()
             f = self.f.view(-1).long()
-            vmapping = torch.zeros(self.vt.shape[0], dtype=torch.long, device=self.device)
-            vmapping[ft] = f # scatter, randomly choose one if index is not unique
+            vmapping = torch.zeros(
+                self.vt.shape[0], dtype=torch.long, device=self.device
+            )
+            vmapping[ft] = f  # scatter, randomly choose one if index is not unique
 
         self.v = self.v[vmapping]
         self.f = self.ft
@@ -419,7 +481,7 @@ class Mesh:
             if tensor is not None:
                 setattr(self, name, tensor.to(device))
         return self
-    
+
     def write(self, path):
         if path.endswith(".ply"):
             self.write_ply(path)
@@ -429,7 +491,7 @@ class Mesh:
             self.write_glb(path)
         else:
             raise NotImplementedError(f"format {path} not supported!")
-    
+
     # write to ply file (only geom)
     def write_ply(self, path):
 
@@ -442,7 +504,9 @@ class Mesh:
     # write to gltf/glb file (geom + texture)
     def write_glb(self, path):
 
-        assert self.vn is not None and self.vt is not None # should be improved to support export without texture...
+        assert (
+            self.vn is not None and self.vt is not None
+        )  # should be improved to support export without texture...
 
         # assert self.v.shape[0] == self.vn.shape[0] and self.v.shape[0] == self.vt.shape[0]
         if self.v.shape[0] != self.vt.shape[0]:
@@ -465,21 +529,27 @@ class Mesh:
         v_np_blob = v_np.tobytes()
         # vn_np_blob = vn_np.tobytes()
         vt_np_blob = vt_np.tobytes()
-        albedo_blob = cv2.imencode('.png', albedo)[1].tobytes()
+        albedo_blob = cv2.imencode(".png", albedo)[1].tobytes()
 
         gltf = pygltflib.GLTF2(
             scene=0,
             scenes=[pygltflib.Scene(nodes=[0])],
             nodes=[pygltflib.Node(mesh=0)],
-            meshes=[pygltflib.Mesh(primitives=[
-                pygltflib.Primitive(
-                    # indices to accessors (0 is triangles)
-                    attributes=pygltflib.Attributes(
-                        POSITION=1, TEXCOORD_0=2, 
-                    ),
-                    indices=0, material=0,
+            meshes=[
+                pygltflib.Mesh(
+                    primitives=[
+                        pygltflib.Primitive(
+                            # indices to accessors (0 is triangles)
+                            attributes=pygltflib.Attributes(
+                                POSITION=1,
+                                TEXCOORD_0=2,
+                            ),
+                            indices=0,
+                            material=0,
+                        )
+                    ]
                 )
-            ])],
+            ],
             materials=[
                 pygltflib.Material(
                     pbrMetallicRoughness=pygltflib.PbrMetallicRoughness(
@@ -495,14 +565,24 @@ class Mesh:
                 pygltflib.Texture(sampler=0, source=0),
             ],
             samplers=[
-                pygltflib.Sampler(magFilter=pygltflib.LINEAR, minFilter=pygltflib.LINEAR_MIPMAP_LINEAR, wrapS=pygltflib.REPEAT, wrapT=pygltflib.REPEAT),
+                pygltflib.Sampler(
+                    magFilter=pygltflib.LINEAR,
+                    minFilter=pygltflib.LINEAR_MIPMAP_LINEAR,
+                    wrapS=pygltflib.REPEAT,
+                    wrapT=pygltflib.REPEAT,
+                ),
             ],
             images=[
                 # use embedded (buffer) image
                 pygltflib.Image(bufferView=3, mimeType="image/png"),
             ],
             buffers=[
-                pygltflib.Buffer(byteLength=len(f_np_blob) + len(v_np_blob) + len(vt_np_blob) + len(albedo_blob))
+                pygltflib.Buffer(
+                    byteLength=len(f_np_blob)
+                    + len(v_np_blob)
+                    + len(vt_np_blob)
+                    + len(albedo_blob)
+                )
             ],
             # buffer view (based on dtype)
             bufferViews=[
@@ -510,22 +590,22 @@ class Mesh:
                 pygltflib.BufferView(
                     buffer=0,
                     byteLength=len(f_np_blob),
-                    target=pygltflib.ELEMENT_ARRAY_BUFFER, # GL_ELEMENT_ARRAY_BUFFER (34963)
+                    target=pygltflib.ELEMENT_ARRAY_BUFFER,  # GL_ELEMENT_ARRAY_BUFFER (34963)
                 ),
                 # positions; as vec3 array
                 pygltflib.BufferView(
                     buffer=0,
                     byteOffset=len(f_np_blob),
                     byteLength=len(v_np_blob),
-                    byteStride=12, # vec3
-                    target=pygltflib.ARRAY_BUFFER, # GL_ARRAY_BUFFER (34962)
+                    byteStride=12,  # vec3
+                    target=pygltflib.ARRAY_BUFFER,  # GL_ARRAY_BUFFER (34962)
                 ),
                 # texcoords; as vec2 array
                 pygltflib.BufferView(
                     buffer=0,
                     byteOffset=len(f_np_blob) + len(v_np_blob),
                     byteLength=len(vt_np_blob),
-                    byteStride=8, # vec2
+                    byteStride=8,  # vec2
                     target=pygltflib.ARRAY_BUFFER,
                 ),
                 # texture; as none target
@@ -539,7 +619,7 @@ class Mesh:
                 # 0 = triangles
                 pygltflib.Accessor(
                     bufferView=0,
-                    componentType=pygltflib.UNSIGNED_INT, # GL_UNSIGNED_INT (5125)
+                    componentType=pygltflib.UNSIGNED_INT,  # GL_UNSIGNED_INT (5125)
                     count=f_np.size,
                     type=pygltflib.SCALAR,
                     max=[int(f_np.max())],
@@ -548,7 +628,7 @@ class Mesh:
                 # 1 = positions
                 pygltflib.Accessor(
                     bufferView=1,
-                    componentType=pygltflib.FLOAT, # GL_FLOAT (5126)
+                    componentType=pygltflib.FLOAT,  # GL_FLOAT (5126)
                     count=len(v_np),
                     type=pygltflib.VEC3,
                     max=v_np.max(axis=0).tolist(),

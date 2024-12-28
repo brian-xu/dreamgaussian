@@ -1,22 +1,19 @@
 import os
-import cv2
 import time
-import tqdm
-import numpy as np
-import dearpygui.dearpygui as dpg
 
+import cv2
+import dearpygui.dearpygui as dpg
+import numpy as np
+import open3d as o3d
+import rembg
 import torch
 import torch.nn.functional as F
-
-import rembg
-
-from utils.mesh_utils import post_process_mesh
-from utils.cam_utils import orbit_camera, OrbitCamera
-from gs_renderer import Renderer, MiniCam
-
+import tqdm
 from grid_put import mipmap_linear_grid_put_2d
+from gs_renderer import MiniCam, Renderer
 from mesh import Mesh, safe_normalize
-import open3d as o3d
+from utils.cam_utils import OrbitCamera, orbit_camera
+from utils.mesh_utils import post_process_mesh
 
 
 class GUI:
@@ -267,6 +264,7 @@ class GUI:
 
                 # render random view
                 ver = np.random.randint(min_ver, max_ver)
+                # TODO: increase sampling at side views
                 hor = np.random.randint(-180, 180)
                 radius = 0
 
@@ -519,7 +517,7 @@ class GUI:
         os.makedirs(self.opt.outdir, exist_ok=True)
         if mode == "geo":
             path = os.path.join(self.opt.outdir, self.opt.save_path + "_mesh.ply")
-            mesh = self.renderer.gaussians.extract_mesh(path, self.opt.density_thresh)
+            mesh = self.renderer.extract_mesh(path, self.opt.density_thresh)
             mesh.write_ply(path)
 
         elif mode == "geo+tex":
@@ -647,8 +645,8 @@ class GUI:
             mask = mask.detach().cpu().numpy()
 
             # dilate texture
-            from sklearn.neighbors import NearestNeighbors
             from scipy.ndimage import binary_dilation, binary_erosion
+            from sklearn.neighbors import NearestNeighbors
 
             inpaint_region = binary_dilation(mask, iterations=32)
             inpaint_region[mask] = 0
@@ -1035,6 +1033,7 @@ class GUI:
 
 if __name__ == "__main__":
     import argparse
+
     from omegaconf import OmegaConf
 
     parser = argparse.ArgumentParser()

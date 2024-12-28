@@ -1,18 +1,16 @@
 import os
-import cv2
 import time
-import tqdm
-import numpy as np
-import dearpygui.dearpygui as dpg
 
+import cv2
+import dearpygui.dearpygui as dpg
+import numpy as np
+import rembg
 import torch
 import torch.nn.functional as F
-
+import tqdm
 import trimesh
-import rembg
-
-from utils.cam_utils import orbit_camera, OrbitCamera
 from mesh_renderer import Renderer
+from utils.cam_utils import OrbitCamera, orbit_camera
 
 # from kiui.lpips import LPIPS
 
@@ -785,6 +783,7 @@ class GUI:
 
 if __name__ == "__main__":
     import argparse
+
     from omegaconf import OmegaConf
 
     parser = argparse.ArgumentParser()

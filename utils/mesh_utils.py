@@ -9,17 +9,17 @@
 # For inquiries contact  huangbb@shanghaitech.edu.cn
 #
 
-import torch
-import numpy as np
-import os
 import math
+import os
+from functools import partial
+
+import numpy as np
+import open3d as o3d
+import pymeshlab as pml
+import torch
+import trimesh
 from tqdm import tqdm
 from utils.render_utils import save_img_f32, save_img_u8
-from functools import partial
-import open3d as o3d
-import trimesh
-import numpy as np
-import pymeshlab as pml
 
 
 def poisson_mesh_reconstruction(points, normals=None):
@@ -288,7 +288,7 @@ class GaussianExtractor(object):
         """
         Estimate the bounding sphere given camera pose
         """
-        from utils.render_utils import transform_poses_pca, focus_point_fn
+        from utils.render_utils import focus_point_fn, transform_poses_pca
 
         torch.cuda.empty_cache()
         c2ws = np.array(
@@ -337,7 +337,10 @@ class GaussianExtractor(object):
             depth = self.depthmaps[i]
 
             # if we have mask provided, use it
-            if mask_backgrond and (self.viewpoint_stack[i].gt_alpha_mask is not None):
+            if mask_backgrond and (
+                hasattr(self.viewpoint_stack[i], "gt_alpha_mask")
+                and self.viewpoint_stack[i].gt_alpha_mask is not None
+            ):
                 depth[(self.viewpoint_stack[i].gt_alpha_mask < 0.5)] = 0
 
             # make open3d rgbd

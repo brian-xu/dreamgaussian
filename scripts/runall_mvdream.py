@@ -1,23 +1,26 @@
-import os
-import glob
 import argparse
+import glob
+import os
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--gpu', default=0, type=int)
+parser.add_argument("--gpu", default=0, type=int)
 args = parser.parse_args()
 
 prompts = [
-    ('lamp', 'lamp, zen, realistic, 8K, HDR'),
-    ('snowman', 'a cute snowman'),
-    ('crystal', 'large crystal, incriptions, pixar style, pastel colors'),
-    ('dinosour', 'cute dinosaur, pixar style'),
-    ('owl', 'a cute owl, low poly, pbr'),
-    ('rocket', 'knitted rocket, knitted, embroidery details, photorealistic, 4k, plushie, HD, detailed'),
-    ('rainbow_octopus', 'rainbow octopus plush toy'),
-    ('chicken', 'low poly adorable chicken'),
-    ('cathoodie', 'a cat in a hoodie'),
-    ('catfrog', 'a cat frog'),
-    ('lantern', 'a mystical lantern'),
+    ("lamp", "lamp, zen, realistic, 8K, HDR"),
+    ("snowman", "a cute snowman"),
+    ("crystal", "large crystal, incriptions, pixar style, pastel colors"),
+    ("dinosour", "cute dinosaur, pixar style"),
+    ("owl", "a cute owl, low poly, pbr"),
+    (
+        "rocket",
+        "knitted rocket, knitted, embroidery details, photorealistic, 4k, plushie, HD, detailed",
+    ),
+    ("rainbow_octopus", "rainbow octopus plush toy"),
+    ("chicken", "low poly adorable chicken"),
+    ("cathoodie", "a cat in a hoodie"),
+    ("catfrog", "a cat frog"),
+    ("lantern", "a mystical lantern"),
     # ('squirrel', 'a DSLR photo of a squirrel.'),
     # ('corgi', 'a DSLR photo of a corgi dog.'),
     # ('motorcycles', 'a DSLR photo of a motorcycles.'),
@@ -51,16 +54,21 @@ prompts = [
     # ('cat_hat', 'a photo of a cat wearing a wizard hat'),
     # ('cat_ball', 'a photo of a cat playing with a red ball'),
     # ('nendoroid', 'a nendoroid of a chibi girl'),
-
 ]
 
 for name, prompt in prompts:
-    print(f'======== processing {name} ========')
+    print(f"======== processing {name} ========")
     # first stage
-    os.system(f'CUDA_VISIBLE_DEVICES={args.gpu} python main.py --config configs/text_mv.yaml prompt="{prompt}" save_path={name}')
+    os.system(
+        f'CUDA_VISIBLE_DEVICES={args.gpu} python main.py --config configs/text_mv.yaml prompt="{prompt}" save_path={name}'
+    )
     # second stage
-    os.system(f'CUDA_VISIBLE_DEVICES={args.gpu} python main2.py --config configs/text_mv.yaml  prompt="{prompt}" save_path={name}')
+    os.system(
+        f'CUDA_VISIBLE_DEVICES={args.gpu} python main2.py --config configs/text_mv.yaml  prompt="{prompt}" save_path={name}'
+    )
     # export video
-    mesh_path = os.path.join('logs', f'{name}.obj')
-    os.makedirs('videos', exist_ok=True)
-    os.system(f'python -m kiui.render {mesh_path} --save_video videos/{name}.mp4 --wogui')
+    mesh_path = os.path.join("logs", f"{name}.obj")
+    os.makedirs("videos", exist_ok=True)
+    os.system(
+        f"python -m kiui.render {mesh_path} --save_video videos/{name}.mp4 --wogui"
+    )

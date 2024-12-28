@@ -1,25 +1,19 @@
-import os
 import math
-import numpy as np
+import os
 from typing import NamedTuple
-from plyfile import PlyData, PlyElement
-
-import torch
-from torch import nn
-
-from diff_surfel_rasterization import (
-    GaussianRasterizationSettings,
-    GaussianRasterizer,
-)
-from simple_knn._C import distCUDA2
-
-from utils.sh_utils import eval_sh, SH2RGB, RGB2SH
-from mesh import Mesh
-from utils.mesh_utils import decimate_mesh, clean_mesh, GaussianExtractor
-from utils.point_utils import depth_to_normal, depths_to_points
-from gaussian_model import GaussianModel
 
 import kiui
+import numpy as np
+import torch
+from diff_surfel_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from gaussian_model import GaussianModel
+from mesh import Mesh
+from plyfile import PlyData, PlyElement
+from simple_knn._C import distCUDA2
+from torch import nn
+from utils.mesh_utils import GaussianExtractor, clean_mesh, decimate_mesh
+from utils.point_utils import depth_to_normal, depths_to_points
+from utils.sh_utils import RGB2SH, SH2RGB, eval_sh
 
 
 def inverse_sigmoid(x):
@@ -211,8 +205,7 @@ class Renderer:
             self.gaussians, self.render, bg_color=self.bg_color
         )
         gaussExtractor.reconstruction(self.trainCameras)
-        mesh = gaussExtractor.extract_mesh_unbounded(resolution=resolution)
-        # return mesh
+        mesh = gaussExtractor.extract_mesh_bounded()
 
         vertices = np.asarray(mesh.vertices)
         triangles = np.asarray(mesh.triangles)
