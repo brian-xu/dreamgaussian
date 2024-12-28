@@ -10,11 +10,13 @@ import torch.nn.functional as F
 
 import rembg
 
-from cam_utils import orbit_camera, OrbitCamera
+from utils.mesh_utils import post_process_mesh
+from utils.cam_utils import orbit_camera, OrbitCamera
 from gs_renderer import Renderer, MiniCam
 
 from grid_put import mipmap_linear_grid_put_2d
 from mesh import Mesh, safe_normalize
+import open3d as o3d
 
 
 class GUI:
@@ -524,7 +526,7 @@ class GUI:
             path = os.path.join(
                 self.opt.outdir, self.opt.save_path + "_mesh." + self.opt.mesh_format
             )
-            mesh = self.renderer.gaussians.extract_mesh(path, self.opt.density_thresh)
+            mesh = self.renderer.extract_mesh(path, self.opt.density_thresh)
 
             # perform texture extraction
             print(f"[INFO] unwrap uv...")
