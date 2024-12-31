@@ -146,6 +146,12 @@ class GUI:
 
                 self.guidance_sd = ImageDream(self.device)
                 print(f"[INFO] loaded ImageDream!")
+            elif self.opt.sdi:
+                print(f"[INFO] loading SDI...")
+                from guidance.sdi_utils import StableDiffusionSDI
+
+                self.guidance_sd = StableDiffusionSDI(self.device)
+                print(f"[INFO] loaded SDI!")
             else:
                 print(f"[INFO] loading SD...")
                 from guidance.sd_utils import StableDiffusion
@@ -155,7 +161,7 @@ class GUI:
 
         if self.guidance_zero123 is None and self.enable_zero123:
             print(f"[INFO] loading zero123...")
-            from guidance.zero123_utils import Zero123
+            from guidance.zero123_sdi_utils import Zero123
 
             if self.opt.stable_zero123:
                 self.guidance_zero123 = Zero123(
@@ -264,7 +270,7 @@ class GUI:
 
                 # render random view
                 ver = np.random.randint(min_ver, max_ver)
-                # TODO: increase sampling at side views
+                # TODO: change sampling bias
                 hor = np.random.randint(-180, 180)
                 radius = 0
 
@@ -336,7 +342,15 @@ class GUI:
 
             # guidance loss
             if self.enable_sd:
-                if self.opt.mvdream or self.opt.imagedream:
+                if self.opt.sdi:
+                    loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(
+                        images,
+                        step_ratio=step_ratio if self.opt.anneal_timestep else None,
+                        elevation=torch.Tensor(vers).to(self.device),
+                        azimuth=torch.Tensor(hors).to(self.device),
+                        camera_distances=torch.Tensor(radii).to(self.device),
+                    )
+                elif self.opt.mvdream or self.opt.imagedream:
                     loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(
                         images,
                         poses,
