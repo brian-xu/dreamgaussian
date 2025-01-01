@@ -143,16 +143,9 @@ class Zero123(nn.Module):
             latents = self.encode_imgs(pred_rgb_256.to(self.dtype))
 
             if self.use_sdi:
-                t = torch.randint(
-                    self.min_step,
-                    self.max_step + 1,
-                    [1],
-                    dtype=self.dtype,
-                    device=self.device,
-                )
                 latents, noise = self.invert_noise(
                     latents,
-                    t,
+                    torch.randn_like(latents),
                     elevation=elevation,
                     azimuth=azimuth,
                     camera_distances=radius,
@@ -240,13 +233,6 @@ class Zero123(nn.Module):
 
         with torch.no_grad():
             if self.use_sdi:
-                t = torch.randint(
-                    self.min_step,
-                    self.max_step + 1,
-                    [1],
-                    dtype=self.dtype,
-                    device=self.device,
-                )
                 latents_noisy, noise = self.invert_noise(
                     latents,
                     t,
@@ -333,10 +319,12 @@ class Zero123(nn.Module):
                 camera_distances,
                 guidance_scale=-7.5,
             )
-            latents = self.ddim_inversion_step(noise_pred, t, next_t, latents)
+            latents = self.ddim_inversion_step(
+                noise_pred, t.int(), next_t.int(), latents
+            )
 
         # remap the noise from t+delta_t to t
-        found_noise = self.get_noise_from_target(start_latents, latents, next_t)
+        found_noise = self.get_noise_from_target(start_latents, latents, next_t.int())
 
         return latents, found_noise
 

@@ -22,7 +22,7 @@ save_path: ???
 # use surfel splatting (2dgs) instead of 3dgs
 use_surfels: True
 # use score distillation inversion:
-use_sdi: True
+use_sdi: False
 # use mvdream instead of sd 2.1
 mvdream: True
 # use imagedream

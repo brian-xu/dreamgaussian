@@ -146,16 +146,9 @@ class StableDiffusion(nn.Module):
         self.scheduler.set_timesteps(steps)
         init_step = int(steps * strength)
         if self.use_sdi:
-            t = torch.randint(
-                self.min_step,
-                self.max_step + 1,
-                [1],
-                dtype=self.dtype,
-                device=self.device,
-            )
             latents, noise = self.invert_noise(
                 latents,
-                t,
+                torch.randn_like(latents),
                 use_perp_neg=True,
                 elevation=elevation,
                 azimuth=azimuth,
@@ -242,13 +235,6 @@ class StableDiffusion(nn.Module):
             w = (1 - self.alphas[t]).view(batch_size, 1, 1, 1)
 
             if self.use_sdi:
-                t = torch.randint(
-                    self.min_step,
-                    self.max_step + 1,
-                    [1],
-                    dtype=self.dtype,
-                    device=self.device,
-                )
                 latents_noisy, noise = self.invert_noise(
                     latents,
                     t,
@@ -441,10 +427,12 @@ class StableDiffusion(nn.Module):
                 camera_distances,
                 guidance_scale=-7.5,
             )
-            latents = self.ddim_inversion_step(noise_pred, t, next_t, latents)
+            latents = self.ddim_inversion_step(
+                noise_pred, t.int(), next_t.int(), latents
+            )
 
         # remap the noise from t+delta_t to t
-        found_noise = self.get_noise_from_target(start_latents, latents, next_t)
+        found_noise = self.get_noise_from_target(start_latents, latents, next_t.int())
 
         return latents, found_noise
 

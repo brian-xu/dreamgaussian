@@ -117,16 +117,9 @@ class MVDream(nn.Module):
         self.scheduler.set_timesteps(steps)
         init_step = int(steps * strength)
         if self.use_sdi:
-            t = torch.randint(
-                self.min_step,
-                self.max_step + 1,
-                [1],
-                dtype=self.dtype,
-                device=self.device,
-            )
             latents, noise = self.invert_noise(
                 latents,
-                t,
+                torch.randn_like(latents),
                 elevation=elevation,
                 azimuth=azimuth,
                 camera_distances=camera_distances,
@@ -265,13 +258,6 @@ class MVDream(nn.Module):
         with torch.no_grad():
             # add noise
             if self.use_sdi:
-                t = torch.randint(
-                    self.min_step,
-                    self.max_step + 1,
-                    [1],
-                    dtype=self.dtype,
-                    device=self.device,
-                )
                 latents_noisy, noise, tt = self.invert_noise(
                     latents,
                     t,
