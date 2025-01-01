@@ -19,6 +19,10 @@ mesh_format: obj
 save_path: ???
 
 ### Training
+# use surfel splatting (2dgs) instead of 3dgs
+use_surfels: True
+# use score distillation inversion:
+use_sdi: True
 # use mvdream instead of sd 2.1
 mvdream: True
 # use imagedream

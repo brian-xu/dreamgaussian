@@ -19,6 +19,10 @@ mesh_format: obj
 save_path: ???
 
 ### Training
+# use surfel splatting (2dgs) instead of 3dgs
+use_surfels: True
+# use score distillation inversion:
+use_sdi: True
 # use mvdream instead of sd 2.1
 mvdream: False
 # use imagedream
@@ -56,7 +60,7 @@ invert_bg_prob: 0.5
 
 ### GUI
 gui: False
-force_cuda_rast: False
+force_cuda_rast: True
 # GUI resolution
 H: 800
 W: 800

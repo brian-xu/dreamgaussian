@@ -1,9 +1,11 @@
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
-from diffusers import DDIMScheduler
+from diffusers import DDIMInverseScheduler, DDIMScheduler
 from imagedream.camera_utils import (
     convert_opengl_to_blender,
     get_camera,
@@ -11,6 +13,11 @@ from imagedream.camera_utils import (
 )
 from imagedream.ldm.models.diffusion.ddim import DDIMSampler
 from imagedream.model_zoo import build_model
+from sympy import N
+from utils.threestudio_utils import (
+    get_text_embeddings_perp_neg,
+    perpendicular_component,
+)
 
 
 class ImageDream(nn.Module):
@@ -20,6 +27,7 @@ class ImageDream(nn.Module):
         model_name="sd-v2.1-base-4view-ipmv",
         ckpt_path=None,
         t_range=[0.02, 0.98],
+        use_sdi=False,
     ):
         super().__init__()
 
@@ -50,6 +58,22 @@ class ImageDream(nn.Module):
             subfolder="scheduler",
             torch_dtype=self.dtype,
         )
+        self.scheduler.alphas_cumprod = self.scheduler.alphas_cumprod.to(
+            device=self.device
+        )
+
+        self.use_sdi = use_sdi
+        if self.use_sdi:
+            self.inverse_scheduler = DDIMInverseScheduler.from_pretrained(
+                "stabilityai/stable-diffusion-2-1-base",
+                subfolder="scheduler",
+                torch_dtype=self.dtype,
+            )
+            inversion_n_steps = 10
+            self.inverse_scheduler.set_timesteps(inversion_n_steps, device=self.device)
+            self.inverse_scheduler.alphas_cumprod = (
+                self.inverse_scheduler.alphas_cumprod.to(device=self.device)
+            )
 
     @torch.no_grad()
     def get_image_text_embeds(self, image, prompts, negative_prompts):
@@ -85,6 +109,9 @@ class ImageDream(nn.Module):
         guidance_scale=5,
         steps=50,
         strength=0.8,
+        elevation=None,
+        azimuth=None,
+        camera_distances=None,
     ):
 
         batch_size = pred_rgb.shape[0]
@@ -93,12 +120,6 @@ class ImageDream(nn.Module):
             pred_rgb, (256, 256), mode="bilinear", align_corners=False
         )
         latents = self.encode_imgs(pred_rgb_256.to(self.dtype))
-
-        self.scheduler.set_timesteps(steps)
-        init_step = int(steps * strength)
-        latents = self.scheduler.add_noise(
-            latents, torch.randn_like(latents), self.scheduler.timesteps[init_step]
-        )
 
         camera = camera[:, [0, 2, 1, 3]]  # to blender convention (flip y & z axis)
         camera[:, 1] *= -1
@@ -141,6 +162,29 @@ class ImageDream(nn.Module):
             "camera": camera,
             "num_frames": 4 + 1,
         }
+
+        self.scheduler.set_timesteps(steps)
+        init_step = int(steps * strength)
+        if self.use_sdi:
+            t = torch.randint(
+                self.min_step,
+                self.max_step + 1,
+                [1],
+                dtype=self.dtype,
+                device=self.device,
+            )
+            latents, noise = self.invert_noise(
+                latents,
+                t,
+                elevation=elevation,
+                azimuth=azimuth,
+                camera_distances=camera_distances,
+                context=context,
+            )
+        else:
+            latents = self.scheduler.add_noise(
+                latents, torch.randn_like(latents), self.scheduler.timesteps[init_step]
+            )
 
         for i, t in enumerate(self.scheduler.timesteps[init_step:]):
 
@@ -187,6 +231,9 @@ class ImageDream(nn.Module):
         step_ratio=None,
         guidance_scale=5,
         as_latent=False,
+        elevation=None,
+        azimuth=None,
+        camera_distances=None,
     ):
 
         batch_size = pred_rgb.shape[0]
@@ -268,18 +315,35 @@ class ImageDream(nn.Module):
         # predict the noise residual with unet, NO grad!
         with torch.no_grad():
             # add noise
-            noise = torch.randn_like(latents)
-            latents_noisy = self.model.q_sample(latents, t, noise)  # [B=4, 4, 32, 32]
-            # extra view
-            t = t.view(real_batch_size, 4)
-            t = torch.cat([t, t[:, :1]], dim=1).view(-1)
-            latents_noisy = latents_noisy.view(real_batch_size, 4, 4, 32, 32)
-            latents_noisy = torch.cat(
-                [latents_noisy, torch.zeros_like(latents_noisy[:, :1])], dim=1
-            ).view(-1, 4, 32, 32)
+            if self.use_sdi:
+                t = torch.randint(
+                    self.min_step,
+                    self.max_step + 1,
+                    [1],
+                    dtype=self.dtype,
+                    device=self.device,
+                )
+                latents_noisy, noise, tt = self.invert_noise(
+                    latents,
+                    t,
+                    elevation=elevation,
+                    azimuth=azimuth,
+                    camera_distances=camera_distances,
+                    context=context,
+                )
+                noise = noise[:-1]
+            else:
+                noise = torch.randn_like(latents)
+                latents_noisy = self.model.q_sample(latents, t, noise)  # extra view
+                latents_noisy = latents_noisy.view(real_batch_size, 4, 4, 32, 32)
+                latents_noisy = torch.cat(
+                    [latents_noisy, torch.zeros_like(latents_noisy[:, :1])], dim=1
+                ).view(-1, 4, 32, 32)
+                t = t.view(real_batch_size, 4)
+                t = torch.cat([t, t[:, :1]], dim=1).view(-1)
+                tt = torch.cat([t] * 2)
             # pred noise
             latent_model_input = torch.cat([latents_noisy] * 2)
-            tt = torch.cat([t] * 2)
 
             # import kiui
             # kiui.lo(latent_model_input, t, context['context'], context['camera'])
@@ -403,6 +467,189 @@ class ImageDream(nn.Module):
         imgs = (imgs * 255).round().astype("uint8")
 
         return imgs
+
+    # From SDI
+    @torch.no_grad()
+    def invert_noise(
+        self,
+        start_latents,
+        invert_to_t,
+        elevation,
+        azimuth,
+        camera_distances,
+        context,
+    ):
+        start_latents = torch.cat(
+            [start_latents, torch.zeros_like(start_latents[:, :1])], dim=1
+        ).view(-1, 4, 32, 32)
+        latents = start_latents.clone()
+        B = start_latents.shape[0]
+
+        timesteps = self.get_inversion_timesteps(invert_to_t, B)
+        for t, next_t in zip(timesteps[:-1], timesteps[1:]):
+            noise_pred, tt = self.predict_noise(
+                latents,
+                t.repeat([B]),
+                elevation,
+                azimuth,
+                camera_distances,
+                guidance_scale=-7.5,
+                context=context,
+            )
+            latents = self.ddim_inversion_step(
+                noise_pred, t.int(), next_t.int(), latents
+            )
+
+        # remap the noise from t+delta_t to t
+        found_noise = self.get_noise_from_target(start_latents, latents, next_t.int())
+
+        return latents, found_noise, tt
+
+    @torch.no_grad()
+    def predict_noise(
+        self,
+        latents_noisy,
+        t,
+        elevation,
+        azimuth,
+        camera_distances,
+        guidance_scale: float = 1.0,
+        context=None,
+    ):
+
+        batch_size = elevation.shape[0]
+        tt = torch.cat([t] * 2)
+        # predict the noise residual with unet, NO grad!
+        with torch.no_grad():
+            # pred noise
+            latent_model_input = torch.cat([latents_noisy] * 2, dim=0)
+            noise_pred = self.model.apply_model(
+                latent_model_input,
+                tt,
+                context,
+            )
+
+        noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
+        noise_pred = noise_pred_text + guidance_scale * (
+            noise_pred_text - noise_pred_uncond
+        )
+
+        return noise_pred, tt
+
+    def ddim_inversion_step(
+        self,
+        model_output: torch.FloatTensor,
+        timestep: int,
+        prev_timestep: int,
+        sample: torch.FloatTensor,
+        inversion_eta=0.3,
+    ) -> torch.FloatTensor:
+        # 1. compute alphas, betas
+        # change original implementation to exactly match noise levels for analogous forward process
+        alpha_prod_t = (
+            self.inverse_scheduler.alphas_cumprod[timestep]
+            if timestep >= 0
+            else self.inverse_scheduler.initial_alpha_cumprod
+        )
+        alpha_prod_t_prev = self.inverse_scheduler.alphas_cumprod[prev_timestep]
+
+        beta_prod_t = 1 - alpha_prod_t
+
+        # 2. compute predicted original sample from predicted noise also called
+        # "predicted x_0" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
+        if self.inverse_scheduler.config.prediction_type == "epsilon":
+            pred_original_sample = (
+                sample - beta_prod_t ** (0.5) * model_output
+            ) / alpha_prod_t ** (0.5)
+            pred_epsilon = model_output
+        elif self.inverse_scheduler.config.prediction_type == "sample":
+            pred_original_sample = model_output
+            pred_epsilon = (
+                sample - alpha_prod_t ** (0.5) * pred_original_sample
+            ) / beta_prod_t ** (0.5)
+        elif self.inverse_scheduler.config.prediction_type == "v_prediction":
+            pred_original_sample = (alpha_prod_t**0.5) * sample - (
+                beta_prod_t**0.5
+            ) * model_output
+            pred_epsilon = (alpha_prod_t**0.5) * model_output + (
+                beta_prod_t**0.5
+            ) * sample
+        else:
+            raise ValueError(
+                f"prediction_type given as {self.inverse_scheduler.config.prediction_type} must be one of `epsilon`, `sample`, or"
+                " `v_prediction`"
+            )
+        # 3. Clip or threshold "predicted x_0"
+        if self.inverse_scheduler.config.clip_sample:
+            pred_original_sample = pred_original_sample.clamp(
+                -self.inverse_scheduler.config.clip_sample_range,
+                self.inverse_scheduler.config.clip_sample_range,
+            )
+        # 4. compute "direction pointing to x_t" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
+        pred_sample_direction = (1 - alpha_prod_t_prev) ** (0.5) * pred_epsilon
+
+        # 5. compute x_t without "random noise" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
+        prev_sample = (
+            alpha_prod_t_prev ** (0.5) * pred_original_sample + pred_sample_direction
+        )
+
+        # 6. Add noise to the sample
+        variance = self.scheduler._get_variance(prev_timestep, timestep) ** (0.5)
+        prev_sample += inversion_eta * torch.randn_like(prev_sample) * variance
+
+        return prev_sample
+
+    def get_inversion_timesteps(self, invert_to_t, B, inversion_n_steps=10):
+        n_training_steps = self.inverse_scheduler.config.num_train_timesteps
+        effective_n_inversion_steps = inversion_n_steps  # int((n_training_steps / invert_to_t) * self.cfg.inversion_n_steps)
+
+        if self.inverse_scheduler.config.timestep_spacing == "leading":
+            step_ratio = n_training_steps // effective_n_inversion_steps
+            timesteps = (
+                (np.arange(0, effective_n_inversion_steps) * step_ratio)
+                .round()
+                .copy()
+                .astype(np.int64)
+            )
+            timesteps += self.inverse_scheduler.config.steps_offset
+        elif self.inverse_scheduler.config.timestep_spacing == "trailing":
+            step_ratio = n_training_steps / effective_n_inversion_steps
+            timesteps = np.round(
+                np.arange(n_training_steps, 0, -step_ratio)[::-1]
+            ).astype(np.int64)
+            timesteps -= 1
+        else:
+            raise ValueError(
+                f"{self.inverse_scheduler.config.timestep_spacing} is not supported. Please make sure to choose one of 'leading' or 'trailing'."
+            )
+        # use only timesteps before invert_to_t
+        timesteps = timesteps[timesteps < int(invert_to_t)]
+
+        # Roll timesteps array by one to reflect reversed origin and destination semantics for each step
+        timesteps = np.concatenate([[int(timesteps[0] - step_ratio)], timesteps])
+        timesteps = torch.from_numpy(timesteps).to(self.device)
+
+        # Add the last step
+        delta_t = int(
+            random.random()
+            * self.inverse_scheduler.config.num_train_timesteps
+            // inversion_n_steps
+        )
+        last_t = torch.tensor(
+            min(  # timesteps[-1] + self.inverse_scheduler.config.num_train_timesteps // self.inverse_scheduler.num_inference_steps,
+                invert_to_t + delta_t,
+                self.inverse_scheduler.config.num_train_timesteps - 1,
+            ),
+            device=self.device,
+        )
+        timesteps = torch.cat([timesteps, last_t.repeat([B])])
+        return timesteps
+
+    def get_noise_from_target(self, target, cur_xt, t):
+        alpha_prod_t = self.scheduler.alphas_cumprod[t]
+        beta_prod_t = 1 - alpha_prod_t
+        noise = (cur_xt - target * alpha_prod_t ** (0.5)) / (beta_prod_t ** (0.5))
+        return noise
 
 
 if __name__ == "__main__":

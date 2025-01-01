@@ -16,6 +16,7 @@ pygltflib
 dearpygui
 
 # for stable-diffusion
+open-clip-torch==2.24.0
 huggingface_hub
 diffusers
 accelerate
@@ -34,3 +35,5 @@ gradio
 
 nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast@main
 kiui @ git+https://github.com/ashawkey/kiuikit@main
+mvdream @ git+https://github.com/bytedance/MVDream
+imagedream @ git+https://github.com/bytedance/ImageDream/#subdirectory=extern/ImageDream

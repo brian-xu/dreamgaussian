@@ -41,7 +41,9 @@ class GUI:
         self.enable_zero123 = False
 
         # renderer
-        self.renderer = Renderer(sh_degree=self.opt.sh_degree)
+        self.renderer = Renderer(
+            sh_degree=self.opt.sh_degree, use_surfels=self.opt.use_surfels
+        )
         self.gaussian_scale_factor = 1
 
         # input image
@@ -138,38 +140,38 @@ class GUI:
                 print(f"[INFO] loading MVDream...")
                 from guidance.mvdream_utils import MVDream
 
-                self.guidance_sd = MVDream(self.device)
+                self.guidance_sd = MVDream(self.device, use_sdi=self.opt.use_sdi)
                 print(f"[INFO] loaded MVDream!")
             elif self.opt.imagedream:
                 print(f"[INFO] loading ImageDream...")
                 from guidance.imagedream_utils import ImageDream
 
-                self.guidance_sd = ImageDream(self.device)
+                self.guidance_sd = ImageDream(self.device, use_sdi=self.opt.use_sdi)
                 print(f"[INFO] loaded ImageDream!")
-            elif self.opt.sdi:
-                print(f"[INFO] loading SDI...")
-                from guidance.sdi_utils import StableDiffusionSDI
-
-                self.guidance_sd = StableDiffusionSDI(self.device)
-                print(f"[INFO] loaded SDI!")
             else:
                 print(f"[INFO] loading SD...")
                 from guidance.sd_utils import StableDiffusion
 
-                self.guidance_sd = StableDiffusion(self.device)
+                self.guidance_sd = StableDiffusion(
+                    self.device, use_sdi=self.opt.use_sdi
+                )
                 print(f"[INFO] loaded SD!")
 
         if self.guidance_zero123 is None and self.enable_zero123:
             print(f"[INFO] loading zero123...")
-            from guidance.zero123_sdi_utils import Zero123
+            from guidance.zero123_utils import Zero123
 
             if self.opt.stable_zero123:
                 self.guidance_zero123 = Zero123(
-                    self.device, model_key="ashawkey/stable-zero123-diffusers"
+                    self.device,
+                    model_key="ashawkey/stable-zero123-diffusers",
+                    use_sdi=self.opt.use_sdi,
                 )
             else:
                 self.guidance_zero123 = Zero123(
-                    self.device, model_key="ashawkey/zero123-xl-diffusers"
+                    self.device,
+                    model_key="ashawkey/zero123-xl-diffusers",
+                    use_sdi=self.opt.use_sdi,
                 )
             print(f"[INFO] loaded zero123!")
 
@@ -233,7 +235,11 @@ class GUI:
             loss = 0
 
             ### known view
-            if self.input_img_torch is not None and not self.opt.imagedream:
+            if (
+                self.input_img_torch is not None
+                and not self.opt.imagedream
+                and not self.opt.use_surfels
+            ):
                 cur_cam = self.fixed_cam
                 out = self.renderer.render(cur_cam)
 
@@ -342,24 +348,22 @@ class GUI:
 
             # guidance loss
             if self.enable_sd:
-                if self.opt.sdi:
+                if self.opt.mvdream or self.opt.imagedream:
+                    loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(
+                        images,
+                        poses,
+                        step_ratio=step_ratio if self.opt.anneal_timestep else None,
+                        elevation=torch.Tensor(vers).to(self.device),
+                        azimuth=torch.Tensor(hors).to(self.device),
+                        camera_distances=torch.Tensor(radii).to(self.device),
+                    )
+                else:
                     loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(
                         images,
                         step_ratio=step_ratio if self.opt.anneal_timestep else None,
                         elevation=torch.Tensor(vers).to(self.device),
                         azimuth=torch.Tensor(hors).to(self.device),
                         camera_distances=torch.Tensor(radii).to(self.device),
-                    )
-                elif self.opt.mvdream or self.opt.imagedream:
-                    loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(
-                        images,
-                        poses,
-                        step_ratio=step_ratio if self.opt.anneal_timestep else None,
-                    )
-                else:
-                    loss = loss + self.opt.lambda_sd * self.guidance_sd.train_step(
-                        images,
-                        step_ratio=step_ratio if self.opt.anneal_timestep else None,
                     )
 
             if self.enable_zero123:
@@ -375,7 +379,6 @@ class GUI:
                         default_elevation=self.opt.elevation,
                     )
                 )
-
             # optimize step
             loss.backward()
             self.optimizer.step()
@@ -680,8 +683,8 @@ class GUI:
             albedo[tuple(inpaint_coords.T)] = albedo[
                 tuple(search_coords[indices[:, 0]].T)
             ]
-
             mesh.albedo = torch.from_numpy(albedo).to(self.device)
+
             mesh.write(path)
 
         else:

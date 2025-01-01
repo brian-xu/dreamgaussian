@@ -3,7 +3,7 @@
 input: 
 # input text prompt (default to None, can be input in GUI too)
 prompt:
-negative_prompt:
+negative_prompt: "ugly, bad anatomy, blurry, pixelated obscure, unnatural colors, poor lighting, dull, and unclear, cropped, lowres, low quality, artifacts, duplicate, morbid, mutilated, poorly drawn face, deformed, dehydrated, bad proportions"
 # input mesh for stage 2 (auto-search from stage 1 output path if None)
 mesh:
 # estimated elevation angle for input image 
@@ -19,12 +19,17 @@ mesh_format: obj
 save_path: ???
 
 ### Training
+# use surfel splatting (2dgs) instead of 3dgs
+use_surfels: True
+# use score distillation inversion:
+use_sdi: True
 # use mvdream instead of sd 2.1
 mvdream: False
 # use imagedream
 imagedream: False
 # use stable-zero123 instead of zero123-xl
 stable_zero123: False 
+sdi: False
 # guidance loss weights (0 to disable)
 lambda_sd: 1
 lambda_zero123: 0

@@ -39,6 +39,7 @@ pip install submodules/diff-surfel-rasterization
 pip install submodules/simple-knn
 
 pip install -r requirements.txt
+pip install xformers==0.0.23.post1 --index-url https://download.pytorch.org/whl/cu121
 ```
 
 Tested on:
