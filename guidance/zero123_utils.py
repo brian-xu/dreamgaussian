@@ -143,13 +143,7 @@ class Zero123(nn.Module):
             latents = self.encode_imgs(pred_rgb_256.to(self.dtype))
 
             if self.use_sdi:
-                latents, noise = self.invert_noise(
-                    latents,
-                    torch.randn_like(latents),
-                    elevation=elevation,
-                    azimuth=azimuth,
-                    camera_distances=radius,
-                )
+                pass
             else:
                 latents = self.scheduler.add_noise(
                     latents,
@@ -170,16 +164,34 @@ class Zero123(nn.Module):
             x_in = torch.cat([latents] * 2)
             t_in = t.view(1).to(self.device)
 
-            noise_pred = self.unet(
-                torch.cat([x_in, vae_emb], dim=1),
-                t_in.to(self.unet.dtype),
-                encoder_hidden_states=cc_emb,
-            ).sample
+            if self.use_sdi:
+                latents, noise = self.invert_noise(
+                    latents,
+                    torch.randn_like(latents),
+                    elevation=elevation,
+                    azimuth=azimuth,
+                    camera_distances=radius,
+                )
 
-            noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_cond - noise_pred_uncond
-            )
+                noise_pred, _, _ = self.predict_noise(
+                    latents,
+                    t,
+                    elevation=elevation,
+                    azimuth=azimuth,
+                    camera_distances=radius,
+                    guidance_scale=-7.5,
+                )
+            else:
+                noise_pred = self.unet(
+                    torch.cat([x_in, vae_emb], dim=1),
+                    t_in.to(self.unet.dtype),
+                    encoder_hidden_states=cc_emb,
+                ).sample
+
+                noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + guidance_scale * (
+                    noise_pred_cond - noise_pred_uncond
+                )
 
             latents = self.scheduler.step(noise_pred, t, latents).prev_sample
 
@@ -240,31 +252,44 @@ class Zero123(nn.Module):
                     azimuth=azimuth,
                     camera_distances=radius,
                 )
+                noise_pred, _, _ = self.predict_noise(
+                    latents_noisy,
+                    t,
+                    elevation=elevation,
+                    azimuth=azimuth,
+                    camera_distances=radius,
+                    guidance_scale=-7.5,
+                )
+
             else:
                 noise = torch.randn_like(latents)
                 latents_noisy = self.scheduler.add_noise(latents, noise, t)
 
-            x_in = torch.cat([latents_noisy] * 2)
-            t_in = torch.cat([t] * 2)
+                x_in = torch.cat([latents_noisy] * 2)
+                t_in = torch.cat([t] * 2)
 
-            T = self.get_cam_embeddings(elevation, azimuth, radius, default_elevation)
-            cc_emb = torch.cat([self.embeddings[0].repeat(batch_size, 1, 1), T], dim=-1)
-            cc_emb = self.pipe.clip_camera_projection(cc_emb)
-            cc_emb = torch.cat([cc_emb, torch.zeros_like(cc_emb)], dim=0)
+                T = self.get_cam_embeddings(
+                    elevation, azimuth, radius, default_elevation
+                )
+                cc_emb = torch.cat(
+                    [self.embeddings[0].repeat(batch_size, 1, 1), T], dim=-1
+                )
+                cc_emb = self.pipe.clip_camera_projection(cc_emb)
+                cc_emb = torch.cat([cc_emb, torch.zeros_like(cc_emb)], dim=0)
 
-            vae_emb = self.embeddings[1].repeat(batch_size, 1, 1, 1)
-            vae_emb = torch.cat([vae_emb, torch.zeros_like(vae_emb)], dim=0)
+                vae_emb = self.embeddings[1].repeat(batch_size, 1, 1, 1)
+                vae_emb = torch.cat([vae_emb, torch.zeros_like(vae_emb)], dim=0)
 
-            noise_pred = self.unet(
-                torch.cat([x_in, vae_emb], dim=1),
-                t_in.to(self.unet.dtype),
-                encoder_hidden_states=cc_emb,
-            ).sample
+                noise_pred = self.unet(
+                    torch.cat([x_in, vae_emb], dim=1),
+                    t_in.to(self.unet.dtype),
+                    encoder_hidden_states=cc_emb,
+                ).sample
 
-        noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (
-            noise_pred_cond - noise_pred_uncond
-        )
+                noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + guidance_scale * (
+                    noise_pred_cond - noise_pred_uncond
+                )
 
         grad = w * (noise_pred - noise)
         grad = torch.nan_to_num(grad)

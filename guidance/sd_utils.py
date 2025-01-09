@@ -6,10 +6,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 from diffusers import DDIMInverseScheduler, DDIMScheduler, StableDiffusionPipeline
 from diffusers.utils.import_utils import is_xformers_available
-from utils.threestudio_utils import (
-    get_text_embeddings_perp_neg,
-    perpendicular_component,
-)
+
+
+def perpendicular_component(x, y):
+    # get the component of x that is perpendicular to y
+    eps = torch.ones_like(x[:, 0, 0, 0]) * 1e-6
+    return (
+        x
+        - (
+            torch.mul(x, y).sum(dim=[1, 2, 3])
+            / torch.maximum(torch.mul(y, y).sum(dim=[1, 2, 3]), eps)
+        ).view(-1, 1, 1, 1)
+        * y
+    )
 
 
 def seed_everything(seed):
@@ -73,6 +82,9 @@ class StableDiffusion(nn.Module):
         self.scheduler = DDIMScheduler.from_pretrained(
             model_key, subfolder="scheduler", torch_dtype=self.dtype
         )
+        self.scheduler.alphas_cumprod = self.scheduler.alphas_cumprod.to(
+            device=self.device
+        )
 
         self.use_sdi = use_sdi
         if self.use_sdi:
@@ -108,7 +120,7 @@ class StableDiffusion(nn.Module):
         # directional embeddings
         for d in ["side", "front", "back", "overhead"]:
             pos_embeds = self.encode_text([f"{p}, {d} view" for p in prompts])
-            neg_embeds = self.encode_text([f"{p}, {d} view" for p in prompts])
+            neg_embeds = self.encode_text([f"{p}, {d} view" for p in negative_prompts])
             self.embeddings[d] = pos_embeds
             self.embeddings["pos_vd"].append(pos_embeds)
             self.embeddings["neg_vd"].append(neg_embeds)
@@ -143,17 +155,10 @@ class StableDiffusion(nn.Module):
         latents = self.encode_imgs(pred_rgb_512.to(self.dtype))
         # latents = torch.randn((1, 4, 64, 64), device=self.device, dtype=self.dtype)
 
-        self.scheduler.set_timesteps(steps)
+        self.scheduler.set_timesteps(steps, device=self.device)
         init_step = int(steps * strength)
         if self.use_sdi:
-            latents, noise = self.invert_noise(
-                latents,
-                torch.randn_like(latents),
-                use_perp_neg=True,
-                elevation=elevation,
-                azimuth=azimuth,
-                camera_distances=camera_distances,
-            )
+            pass
         else:
             latents = self.scheduler.add_noise(
                 latents, torch.randn_like(latents), self.scheduler.timesteps[init_step]
@@ -168,18 +173,35 @@ class StableDiffusion(nn.Module):
 
         for i, t in enumerate(self.scheduler.timesteps[init_step:]):
 
-            latent_model_input = torch.cat([latents] * 2)
+            if self.use_sdi:
+                latents, noise = self.invert_noise(
+                    latents,
+                    torch.randn_like(latents),
+                    use_perp_neg=True,
+                    elevation=elevation,
+                    azimuth=azimuth,
+                    camera_distances=camera_distances,
+                )
+                noise_pred, _, _ = self.predict_noise(
+                    latents,
+                    t.repeat(latents.shape[0]),
+                    use_perp_neg=True,
+                    elevation=elevation,
+                    azimuth=azimuth,
+                    camera_distances=camera_distances,
+                    guidance_scale=-7.5,
+                )
+            else:
+                latent_model_input = torch.cat([latents] * 2)
 
-            noise_pred = self.unet(
-                latent_model_input,
-                t,
-                encoder_hidden_states=embeddings,
-            ).sample
+                noise_pred = self.unet(
+                    latent_model_input, t, encoder_hidden_states=embeddings
+                ).sample
 
-            noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_cond - noise_pred_uncond
-            )
+                noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + guidance_scale * (
+                    noise_pred_cond - noise_pred_uncond
+                )
 
             latents = self.scheduler.step(noise_pred, t, latents).prev_sample
 
@@ -252,37 +274,51 @@ class StableDiffusion(nn.Module):
             latent_model_input = torch.cat([latents_noisy] * 2).to(dtype=self.dtype)
             tt = torch.cat([t] * 2).to(dtype=self.dtype)
 
-            if azimuth is None:
-                embeddings = torch.cat(
-                    [
-                        self.embeddings["pos"].expand(batch_size, -1, -1),
-                        self.embeddings["neg"].expand(batch_size, -1, -1),
-                    ]
+            if self.use_sdi:
+                noise_pred, _, _ = self.predict_noise(
+                    latents_noisy,
+                    t.repeat(latents_noisy.shape[0]),
+                    use_perp_neg=True,
+                    elevation=elevation,
+                    azimuth=azimuth,
+                    camera_distances=camera_distances,
+                    guidance_scale=-7.5,
                 )
+                self.scheduler.set_timesteps(50, device=self.device)
+                target = self.scheduler.step(
+                    noise_pred, t.repeat(latents_noisy.shape[0]), latents_noisy
+                ).pred_original_sample
             else:
+                if azimuth is None:
+                    embeddings = torch.cat(
+                        [
+                            self.embeddings["pos"].expand(batch_size, -1, -1),
+                            self.embeddings["neg"].expand(batch_size, -1, -1),
+                        ]
+                    )
+                else:
 
-                def _get_dir_ind(h):
-                    if abs(h) < 60:
-                        return "front"
-                    elif abs(h) < 120:
-                        return "side"
-                    else:
-                        return "back"
+                    def _get_dir_ind(h):
+                        if abs(h) < 60:
+                            return "front"
+                        elif abs(h) < 120:
+                            return "side"
+                        else:
+                            return "back"
 
-                embeddings = torch.cat(
-                    [self.embeddings[_get_dir_ind(h)] for h in azimuth]
-                    + [self.embeddings["neg"].expand(batch_size, -1, -1)]
-                ).to(dtype=self.dtype)
+                    embeddings = torch.cat(
+                        [self.embeddings[_get_dir_ind(h)] for h in azimuth]
+                        + [self.embeddings["neg"].expand(batch_size, -1, -1)]
+                    ).to(dtype=self.dtype)
+                noise_pred = self.unet(
+                    latent_model_input, tt, encoder_hidden_states=embeddings
+                ).sample
 
-            noise_pred = self.unet(
-                latent_model_input, tt, encoder_hidden_states=embeddings
-            ).sample
-
-            # perform guidance (high scale from paper!)
-            noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + guidance_scale * (
-                noise_pred_cond - noise_pred_uncond
-            )
+                # perform guidance (high scale from paper!)
+                noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + guidance_scale * (
+                    noise_pred_cond - noise_pred_uncond
+                )
 
             grad = w * (noise_pred - noise)
             grad = torch.nan_to_num(grad)
@@ -290,7 +326,7 @@ class StableDiffusion(nn.Module):
             # seems important to avoid NaN...
             # grad = grad.clamp(-1, 1)
 
-        target = (latents - grad).detach()
+            target = (latents - grad).detach()
         loss = (
             0.5
             * F.mse_loss(latents.float(), target, reduction="sum")
@@ -320,7 +356,7 @@ class StableDiffusion(nn.Module):
             )
 
         batch_size = latents.shape[0]
-        self.scheduler.set_timesteps(num_inference_steps)
+        self.scheduler.set_timesteps(num_inference_steps, device=self.device)
         embeddings = torch.cat(
             [
                 self.embeddings["pos"].expand(batch_size, -1, -1),
@@ -452,6 +488,8 @@ class StableDiffusion(nn.Module):
         batch_size = elevation.shape[0]
 
         if use_perp_neg:
+            from utils.threestudio_utils import get_text_embeddings_perp_neg
+
             (
                 text_embeddings,
                 neg_guidance_weights,
@@ -490,7 +528,19 @@ class StableDiffusion(nn.Module):
             neg_guidance_weights = None
 
             if text_embeddings is None:
-                text_embeddings = self.embeddings["pos"]
+
+                def _get_dir_ind(h):
+                    if abs(h) < 60:
+                        return "front"
+                    elif abs(h) < 120:
+                        return "side"
+                    else:
+                        return "back"
+
+                text_embeddings = torch.cat(
+                    [self.embeddings[_get_dir_ind(h)] for h in azimuth]
+                    + [self.embeddings["neg"].expand(batch_size, -1, -1)]
+                ).to(dtype=self.dtype)
             # predict the noise residual with unet, NO grad!
             with torch.no_grad():
                 # pred noise
@@ -499,7 +549,7 @@ class StableDiffusion(nn.Module):
                     latent_model_input,
                     torch.cat([t] * 2),
                     encoder_hidden_states=text_embeddings,
-                )
+                ).sample
 
             noise_pred_text, noise_pred_uncond = noise_pred.chunk(2)
             noise_pred = noise_pred_text + guidance_scale * (
